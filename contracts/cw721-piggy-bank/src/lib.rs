@@ -1,7 +1,9 @@
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Coin, CustomMsg, Empty, Uint128};
-pub use cw721_base::{ContractError, InstantiateMsg, MinterResponse};
+use cosmwasm_std::{Coin, CustomMsg, Empty, StdError, Uint128};
+pub use cw721_base::{ContractError as BaseContractError, InstantiateMsg, MinterResponse};
 use cw_storage_plus::Map;
+use cw_utils::PaymentError;
+use thiserror::Error;
 
 // Version info for migration
 const CONTRACT_NAME: &str = "crates.io:cw721-piggy-bank";
@@ -49,8 +51,23 @@ pub type ExecuteMsg = cw721_base::ExecuteMsg<MetadataExt, ExecuteExt>;
 // `Empty` type.
 pub type QueryMsg = cw721_base::QueryMsg<QueryExt>;
 
+/// Custom errors for this contract
+#[derive(Error, Debug, PartialEq)]
+pub enum ContractError {
+    #[error("{0}")]
+    Std(#[from] StdError),
+
+    #[error("{0}")]
+    PaymentError(#[from] PaymentError),
+
+    /// This inherits from cw721-base::ContractError to handle the base contract errors
+    #[error("{0}")]
+    Cw721Error(#[from] cw721_base::ContractError),
+}
+
 /// Map for storing NFT balances (token_id, amount)
-/// TODO refactor to support multiple tokens as deposits
+/// TODO refactor to support multiple tokens as deposits? (maybe not needed)
+/// TODO alteratively, leave as is and just allow reserve token to be configurable.
 pub const BALANCES: Map<&str, Uint128> = Map::new("nft_balances");
 
 #[cfg(not(feature = "library"))]
@@ -95,7 +112,9 @@ pub mod entry {
             },
 
             // Use the default cw721-base implementation
-            _ => Cw721Contract::default().execute(deps, env, info, msg),
+            _ => Cw721Contract::default()
+                .execute(deps, env, info, msg)
+                .map_err(Into::into),
         }
     }
 
@@ -107,15 +126,15 @@ pub mod entry {
     ) -> Result<Response, ContractError> {
         let base = Cw721Contract::default();
 
-        // TODO pay out the piggy bank!
+        // // Check ownership (not needed because checked in base, but for example)
         // let token = base.tokens.load(deps.storage, &token_id)?;
-        // // Check ownership (not needed, but for example)
         // if info.sender != token.owner {
         //     return Err(ContractError::Ownership(
         //         cw721_base::OwnershipError::NotOwner,
         //     ));
         // }
 
+        // Pay out the piggy bank!
         let balance = BALANCES.may_load(deps.storage, &token_id)?;
         let msgs = match balance {
             Some(balance) => {
@@ -146,8 +165,7 @@ pub mod entry {
     ) -> Result<Response, ContractError> {
         // Check that funds were actually sent
         // TODO refactor to support multiple tokens as deposits
-        // TODO FIX ERROR TYPES
-        let amount = must_pay(&info, "ujuno").unwrap_or_default();
+        let amount = must_pay(&info, "ujuno")?;
 
         let base = Cw721Contract::default();
 
