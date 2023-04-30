@@ -1,7 +1,9 @@
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{Coin, CustomMsg, Empty, StdError, Uint128};
-pub use cw721_base::{ContractError as BaseContractError, InstantiateMsg, MinterResponse};
-use cw_storage_plus::Map;
+pub use cw721_base::{
+    ContractError as BaseContractError, InstantiateMsg as BaseInstantiateMsg, MinterResponse,
+};
+use cw_storage_plus::{Item, Map};
 use cw_utils::PaymentError;
 use thiserror::Error;
 
@@ -41,6 +43,22 @@ impl CustomMsg for QueryExt {}
 pub type Cw721Contract<'a> =
     cw721_base::Cw721Contract<'a, MetadataExt, Empty, ExecuteExt, QueryExt>;
 
+#[cw_serde]
+pub struct InstantiateMsg {
+    /// Name of the NFT contract
+    pub name: String,
+    /// Symbol of the NFT contract
+    pub symbol: String,
+
+    /// The minter is the only one who can create new NFTs.
+    /// This is designed for a base NFT that is controlled by an external program
+    /// or contract. You will likely replace this with custom logic in custom NFTs
+    pub minter: String,
+
+    /// Allowed denoms for deposit
+    pub deposit_denom: String,
+}
+
 // The execute message type for this contract.
 // If you don't need the Metadata and Execute extensions, you can use the
 // `Empty` type.
@@ -61,14 +79,14 @@ pub enum ContractError {
     PaymentError(#[from] PaymentError),
 
     /// This inherits from cw721-base::ContractError to handle the base contract errors
-    #[error("{0}")]
+    #[error("NFT contract error: {0}")]
     Cw721Error(#[from] cw721_base::ContractError),
 }
 
 /// Map for storing NFT balances (token_id, amount)
-/// TODO refactor to support multiple tokens as deposits? (maybe not needed)
-/// TODO alteratively, leave as is and just allow reserve token to be configurable.
 pub const BALANCES: Map<&str, Uint128> = Map::new("nft_balances");
+
+pub const DENOM: Item<String> = Item::new("denoms");
 
 #[cfg(not(feature = "library"))]
 pub mod entry {
@@ -84,14 +102,26 @@ pub mod entry {
         mut deps: DepsMut,
         env: Env,
         info: MessageInfo,
-        // TODO Maybe we customize the Instantiate message to include reserve tokens for piggy bank?
-        // TODO Extend to support parameters for determining which image to show
         msg: InstantiateMsg,
     ) -> StdResult<Response> {
         cw2::set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
 
+        // TODO Validate denoms are formated correctly
+
+        // Save denoms
+        DENOM.save(deps.storage, &msg.deposit_denom)?;
+
         // Instantiate the base contract
-        Cw721Contract::default().instantiate(deps.branch(), env, info, msg)
+        Cw721Contract::default().instantiate(
+            deps.branch(),
+            env,
+            info,
+            BaseInstantiateMsg {
+                minter: msg.minter,
+                name: msg.name,
+                symbol: msg.symbol,
+            },
+        )
     }
 
     #[entry_point]
@@ -126,13 +156,7 @@ pub mod entry {
     ) -> Result<Response, ContractError> {
         let base = Cw721Contract::default();
 
-        // // Check ownership (not needed because checked in base, but for example)
-        // let token = base.tokens.load(deps.storage, &token_id)?;
-        // if info.sender != token.owner {
-        //     return Err(ContractError::Ownership(
-        //         cw721_base::OwnershipError::NotOwner,
-        //     ));
-        // }
+        let denom = DENOM.load(deps.storage)?;
 
         // Pay out the piggy bank!
         let balance = BALANCES.may_load(deps.storage, &token_id)?;
@@ -141,8 +165,7 @@ pub mod entry {
                 vec![BankMsg::Send {
                     to_address: info.sender.to_string(),
                     amount: vec![Coin {
-                        // TODO refactor to not hard code later
-                        denom: "ujuno".to_string(),
+                        denom,
                         amount: balance,
                     }],
                 }]
@@ -151,7 +174,6 @@ pub mod entry {
         };
 
         // Pass off to default cw721 burn implementation, handles checking ownership
-        // TODO check ownership test (already handled in default implementation)
         base.execute(deps, env, info, ExecuteMsg::Burn { token_id })?;
 
         Ok(Response::default().add_messages(msgs))
@@ -165,7 +187,8 @@ pub mod entry {
     ) -> Result<Response, ContractError> {
         // Check that funds were actually sent
         // TODO refactor to support multiple tokens as deposits
-        let amount = must_pay(&info, "ujuno")?;
+        let denom = DENOM.load(deps.storage)?;
+        let amount = must_pay(&info, &denom)?;
 
         let base = Cw721Contract::default();
 
@@ -190,10 +213,13 @@ pub mod entry {
             // Optionally override a default cw721-base query
             // QueryMsg::Minter {} => unimplemented!(),
             QueryMsg::Extension { msg } => match msg {
-                // Returns Uint128
-                QueryExt::Balance { token_id } => {
-                    to_binary(&BALANCES.load(deps.storage, &token_id)?)
-                }
+                // Returns Coin type for the ballance of an NFT
+                QueryExt::Balance { token_id } => to_binary(&Coin {
+                    denom: DENOM.load(deps.storage)?,
+                    amount: BALANCES
+                        .may_load(deps.storage, &token_id)?
+                        .unwrap_or_default(),
+                }),
             },
 
             // Use default cw721-base query implementation
@@ -206,7 +232,11 @@ pub mod entry {
 mod tests {
     use super::*;
 
-    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
+    use cosmwasm_std::{
+        coins,
+        testing::{mock_dependencies, mock_env, mock_info},
+        BankMsg, CosmosMsg,
+    };
 
     /// Make sure cw2 version info is properly initialized during instantiation,
     /// and NOT overwritten by the base contract.
@@ -222,6 +252,7 @@ mod tests {
                 name: "".into(),
                 symbol: "".into(),
                 minter: "larry".into(),
+                deposit_denom: "ujuno".into(),
             },
         )
         .unwrap();
@@ -229,5 +260,143 @@ mod tests {
         let version = cw2::get_contract_version(deps.as_ref().storage).unwrap();
         assert_eq!(version.contract, CONTRACT_NAME);
         assert_ne!(version.contract, cw721_base::CONTRACT_NAME);
+    }
+
+    #[test]
+    fn happy_path() {
+        let mut deps = mock_dependencies();
+        const BOB: &str = "bob";
+
+        entry::instantiate(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(BOB, &[]),
+            InstantiateMsg {
+                name: "1337".into(),
+                symbol: "1337".into(),
+                minter: BOB.into(),
+                deposit_denom: "ujuno".into(),
+            },
+        )
+        .unwrap();
+
+        // Mint the NFT
+        entry::execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(BOB, &[]),
+            ExecuteMsg::Mint {
+                token_id: "1".into(),
+                owner: BOB.into(),
+                token_uri: Some("https://ipfs.io/cutedog.json".to_string()),
+                extension: MetadataExt {},
+            },
+        )
+        .unwrap();
+
+        // Calling deposit funds without funds errors
+        entry::execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(BOB, &[]),
+            ExecuteMsg::Extension {
+                msg: ExecuteExt::Deposit {
+                    token_id: "1".to_string(),
+                },
+            },
+        )
+        .unwrap_err();
+
+        // Calling deposit with wrong denom errors
+        entry::execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(BOB, &coins(1000, "uatom")),
+            ExecuteMsg::Extension {
+                msg: ExecuteExt::Deposit {
+                    token_id: "1".to_string(),
+                },
+            },
+        )
+        .unwrap_err();
+
+        // Can't deposit to token id that doesn't exist
+        let err = entry::execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(BOB, &coins(1000, "ujuno")),
+            ExecuteMsg::Extension {
+                msg: ExecuteExt::Deposit {
+                    token_id: "3".to_string(),
+                },
+            },
+        )
+        .unwrap_err();
+        assert_eq!(
+            err,
+            ContractError::Std(StdError::NotFound {
+                kind: "cw721_base::state::TokenInfo<cw721_piggy_bank::MetadataExt>".to_string()
+            })
+        );
+
+        // Calling deposit succeeds with correct token
+        entry::execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(BOB, &coins(1000, "ujuno")),
+            ExecuteMsg::Extension {
+                msg: ExecuteExt::Deposit {
+                    token_id: "1".to_string(),
+                },
+            },
+        )
+        .unwrap();
+
+        // Only owner can burn NFT
+        entry::execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info("rando", &[]),
+            ExecuteMsg::Burn {
+                token_id: "1".to_string(),
+            },
+        )
+        .unwrap_err();
+
+        // Can't burn an NFT that doesn't exist
+        let err = entry::execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(BOB, &[]),
+            ExecuteMsg::Burn {
+                token_id: "2".to_string(),
+            },
+        )
+        .unwrap_err();
+        assert_eq!(
+            err,
+            ContractError::Cw721Error(cw721_base::ContractError::Std(StdError::NotFound {
+                kind: "cw721_base::state::TokenInfo<cw721_piggy_bank::MetadataExt>".to_string()
+            }))
+        );
+
+        // Test burning NFT returns money
+        let res = entry::execute(
+            deps.as_mut(),
+            mock_env(),
+            mock_info(BOB, &[]),
+            ExecuteMsg::Burn {
+                token_id: "1".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            res.messages[0].msg,
+            CosmosMsg::Bank(BankMsg::Send {
+                to_address: BOB.to_string(),
+                amount: coins(1000, "ujuno"),
+            })
+        );
     }
 }
