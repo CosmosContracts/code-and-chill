@@ -1,6 +1,6 @@
 # CW721 Piggy Bank
 
-[![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/CosmosContracts/code-and-chill])
+[![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/CosmosContracts/code-and-chill)
 
 A Juno Code and Chill project! Supports NFTs that can hold deposits (like a piggy bank), deposits can be withdrawn if the NFT is burned.
 
