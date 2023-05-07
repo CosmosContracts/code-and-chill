@@ -25,6 +25,10 @@ pub struct MetadataExt {
 pub enum ExecuteExt {
     /// Used to deposit funds in a particular NFT
     Deposit { token_id: String },
+    UpdateTokenUri {
+        token_id: String,
+        token_uri: String,
+    },
 }
 impl CustomMsg for ExecuteExt {}
 
@@ -77,6 +81,9 @@ pub enum ContractError {
 
     #[error("{0}")]
     PaymentError(#[from] PaymentError),
+
+    #[error("Unauthorized")]
+    Unauthorized {},
 
     /// This inherits from cw721-base::ContractError to handle the base contract errors
     #[error("NFT contract error: {0}")]
@@ -139,6 +146,7 @@ pub mod entry {
             // An ExecuteExt extension
             ExecuteMsg::Extension { msg } => match msg {
                 ExecuteExt::Deposit { token_id } => execute_deposit(deps, env, info, token_id),
+                ExecuteExt::UpdateTokenUri { token_id, token_uri } => execute_update_token_uri(deps, env, info, token_id, token_uri),
             },
 
             // Use the default cw721-base implementation
@@ -146,6 +154,36 @@ pub mod entry {
                 .execute(deps, env, info, msg)
                 .map_err(Into::into),
         }
+    }
+
+    pub fn execute_update_token_uri(
+        deps: DepsMut,
+        env: Env,
+        info: MessageInfo,
+        token_id: String,
+        token_uri: String,
+    ) -> Result<Response, ContractError> {
+        let base = Cw721Contract::default();
+        
+        // Check minter / admin to update token_uri
+        let minter = base.minter(deps.as_ref())?;
+        match minter.minter {
+            Some(minter) => {
+                if info.sender != minter {
+                    return Err(ContractError::Unauthorized {});
+                }
+            },
+            None => {
+                return Err(ContractError::Unauthorized {});
+            }
+        }
+
+        // Update token_uri
+        let mut token = base.tokens.load(deps.storage, &token_id)?;
+        token.token_uri = Some(token_uri.clone());
+        base.tokens.save(deps.storage, &token_id, &token)?;
+        
+        Ok(Response::default().add_attribute("action", "update_token_uri").add_attribute("token_id", token_id).add_attribute("token_uri", token_uri))
     }
 
     pub fn execute_burn(
@@ -186,21 +224,35 @@ pub mod entry {
         token_id: String,
     ) -> Result<Response, ContractError> {
         // Check that funds were actually sent
-        // TODO refactor to support multiple tokens as deposits
         let denom = DENOM.load(deps.storage)?;
+        // Check the right kind of funds were sent
         let amount = must_pay(&info, &denom)?;
 
         let base = Cw721Contract::default();
 
         // Check that the token exists
-        base.tokens.load(deps.storage, &token_id)?;
+        let mut token = base.tokens.load(deps.storage, &token_id)?;
 
         BALANCES.update(deps.storage, &token_id, |balance| -> StdResult<_> {
-            // TODO BONUS maybe update NFT metadata?
+            let new_balance = balance.unwrap_or_default() + amount;            
 
-            // TODO refactore to support multiple tokens as deposits
-            Ok(balance.unwrap_or_default() + amount)
+            // TODO don't hard code
+            let base_url = "<insert_ipfs_url>";
+
+            // Native token micro units are typically 6 decimal places
+            // Check if balance is greater than 1
+            if new_balance > Uint128::new(1000000) {
+                token.token_uri = Some(format!("{}/{}/{}", base_url, token_id, "sapling.json"));
+            } else if new_balance > Uint128::new(10000000) {
+                token.token_uri = Some(format!("{}/{}/{}", base_url, token_id, "tree.json"));
+            } else {
+                token.token_uri = Some(format!("{}/{}/{}", base_url, token_id, "fullgrown.json"));
+            }
+
+            Ok(new_balance)
         })?;
+
+        base.tokens.save(deps.storage, &token_id, &token)?;
 
         Ok(Response::default()
             .add_attribute("action", "deposit")
