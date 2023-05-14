@@ -24,7 +24,7 @@ There are a couple of approaches we can use to create dynamic NFTs:
 - Frontend code that handles the image generation based on on-chain metadata (may not always display correctly in wallets)
 - Update token URI in the contract based on on-chain events
 
-There are tradeoffs for all of these, but we are going to go for the last approach. 
+There are tradeoffs for all of these, but we are going to go for the last approach.
 
 **Dynamic NFT Example: Trees**
 
@@ -34,7 +34,7 @@ Let's use the example of a tree that grows the more we feed it with carbon credi
 
 Here's a potential folder structure we could use:
 
-```
+```ignore
 ./metadata
   /1
     seedling.json
