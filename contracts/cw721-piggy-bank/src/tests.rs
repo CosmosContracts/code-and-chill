@@ -1,14 +1,15 @@
 use crate::{
-    contract::{execute, instantiate, CONTRACT_NAME},
-    msg::{ExecuteExt, ExecuteMsg, InstantiateMsg, MetadataExt},
+    contract::{execute, instantiate, query, CONTRACT_NAME},
+    msg::{ExecuteExt, ExecuteMsg, InstantiateMsg, MetadataExt, QueryMsg},
     ContractError,
 };
 
 use cosmwasm_std::{
-    coins,
+    coins, from_binary,
     testing::{mock_dependencies, mock_env, mock_info},
     BankMsg, CosmosMsg, StdError,
 };
+use cw721::AllNftInfoResponse;
 
 /// Make sure cw2 version info is properly initialized during instantiation,
 /// and NOT overwritten by the base contract.
@@ -60,7 +61,7 @@ fn happy_path() {
         ExecuteMsg::Mint {
             token_id: "1".into(),
             owner: BOB.into(),
-            token_uri: Some("https://ipfs.io/cutedog.json".to_string()),
+            token_uri: Some("https://bafybeie2grcflzjvds7i33bxjjgktjdfcp2h2v27gdkbyuiaelvbgtdewy.ipfs.nftstorage.link/1/seedling.json".to_string()),
             extension: MetadataExt {},
         },
     )
@@ -111,11 +112,26 @@ fn happy_path() {
         })
     );
 
-    // Calling deposit succeeds with correct token
+    // Check token URI is seedling state
+    let token: AllNftInfoResponse<MetadataExt> = from_binary(
+        &query(
+            deps.as_ref(),
+            mock_env(),
+            QueryMsg::AllNftInfo {
+                token_id: "1".to_string(),
+                include_expired: None,
+            },
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(token.info.token_uri, Some("https://bafybeie2grcflzjvds7i33bxjjgktjdfcp2h2v27gdkbyuiaelvbgtdewy.ipfs.nftstorage.link/1/seedling.json".to_string()));
+
+    // Deposit enough to change the token URI
     execute(
         deps.as_mut(),
         mock_env(),
-        mock_info(BOB, &coins(1000, "ujuno")),
+        mock_info(BOB, &coins(1000000, "ujuno")),
         ExecuteMsg::Extension {
             msg: ExecuteExt::Deposit {
                 token_id: "1".to_string(),
@@ -123,6 +139,21 @@ fn happy_path() {
         },
     )
     .unwrap();
+
+    // Check token URI is sapling state
+    let token: AllNftInfoResponse<MetadataExt> = from_binary(
+        &query(
+            deps.as_ref(),
+            mock_env(),
+            QueryMsg::AllNftInfo {
+                token_id: "1".to_string(),
+                include_expired: None,
+            },
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(token.info.token_uri, Some("https://bafybeie2grcflzjvds7i33bxjjgktjdfcp2h2v27gdkbyuiaelvbgtdewy.ipfs.nftstorage.link/1/seedling.json".to_string()));
 
     // Only owner can burn NFT
     execute(
@@ -167,7 +198,7 @@ fn happy_path() {
         res.messages[0].msg,
         CosmosMsg::Bank(BankMsg::Send {
             to_address: BOB.to_string(),
-            amount: coins(1000, "ujuno"),
+            amount: coins(1000000, "ujuno"),
         })
     );
 }

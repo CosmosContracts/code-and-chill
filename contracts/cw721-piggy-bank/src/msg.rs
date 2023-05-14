@@ -14,7 +14,9 @@ pub struct MetadataExt {
 #[cw_serde]
 pub enum ExecuteExt {
     /// Used to deposit funds in a particular NFT
-    Deposit { token_id: String },
+    Deposit {
+        token_id: String,
+    },
     UpdateTokenUri {
         token_id: String,
         token_uri: String,
