@@ -157,7 +157,7 @@ pub fn execute_deposit(
         let new_balance = balance.unwrap_or_default() + amount;
 
         // TODO don't hard code
-        let base_url = "<insert_ipfs_url>";
+        let base_url = "https://bafybeie2grcflzjvds7i33bxjjgktjdfcp2h2v27gdkbyuiaelvbgtdewy.ipfs.nftstorage.link";
 
         // Native token micro units are typically 6 decimal places
         // Check if balance is greater than 1
@@ -165,7 +165,7 @@ pub fn execute_deposit(
             token.token_uri = Some(format!("{}/{}/{}", base_url, token_id, "sapling.json"));
         } else if new_balance > Uint128::new(10000000) {
             token.token_uri = Some(format!("{}/{}/{}", base_url, token_id, "tree.json"));
-        } else {
+        } else if new_balance > Uint128::new(100000000) {
             token.token_uri = Some(format!("{}/{}/{}", base_url, token_id, "fullgrown.json"));
         }
 

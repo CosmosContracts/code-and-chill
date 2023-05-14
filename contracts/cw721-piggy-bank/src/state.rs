@@ -1,5 +1,5 @@
 use cosmwasm_std::Uint128;
-use cw_storage_plus::{Map, Item};
+use cw_storage_plus::{Item, Map};
 
 /// Map for storing NFT balances (token_id, amount)
 pub const BALANCES: Map<&str, Uint128> = Map::new("nft_balances");
