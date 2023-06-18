@@ -1,13 +1,11 @@
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{CustomMsg, Empty};
+use cosmwasm_std::{Coin, CustomMsg, Empty, Uint128};
 
 // Implements extended on-chain metadata, by default cw721 NFTs only store a
 // token_uri, which is a URL to off-chain metadata (same as ERC721).
 #[cw_serde]
 #[derive(Default)]
-pub struct MetadataExt {
-    // TODO support showing different token_uris based on how much is deposited
-}
+pub struct MetadataExt {}
 
 // This is the custom Execute message extension for this contract.
 // Use it to implement custom functionality.
@@ -53,6 +51,20 @@ pub struct InstantiateMsg {
 
     /// Allowed denoms for deposit
     pub deposit_denom: String,
+
+    /// Base URL represents the the base of the URI for token metadata
+    /// Example: https://bafybeie2grcflzjvds7i33bxjjgktjdfcp2h2v27gdkbyuiaelvbgtdewy.ipfs.nftstorage.link/<token_id>
+    pub base_url: String,
+
+    /// The price to mint a new NFT
+    pub mint_price: Coin,
+
+    /// Max NFT supply, the maximum number of NFTs that can be minted
+    /// If set None, unlimited NFTs can be minted
+    pub max_nft_supply: Option<u64>,
+
+    /// The recipient for funds raised from the NFT mint
+    pub sale_funds_recipient: String,
 }
 
 // The execute message type for this contract.

@@ -11,8 +11,14 @@ pub enum ContractError {
     #[error("{0}")]
     PaymentError(#[from] PaymentError),
 
+    #[error("The collection has fully minted out")]
+    MintedOut {},
+
     #[error("Unauthorized")]
     Unauthorized {},
+
+    #[error("Wrong amount was sent")]
+    WrongAmount {},
 
     /// This inherits from cw721-base::ContractError to handle the base contract errors
     #[error("NFT contract error: {0}")]

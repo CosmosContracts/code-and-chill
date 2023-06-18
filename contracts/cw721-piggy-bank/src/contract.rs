@@ -1,6 +1,8 @@
+use std::fmt::format;
+
 use cosmwasm_std::{
     entry_point, to_binary, BankMsg, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Response,
-    StdResult, Uint128,
+    StdError, StdResult, Uint128,
 };
 pub use cw721_base::{
     ContractError as BaseContractError, InstantiateMsg as BaseInstantiateMsg, MinterResponse,
@@ -8,8 +10,11 @@ pub use cw721_base::{
 use cw_utils::must_pay;
 
 use crate::{
-    msg::{Cw721Contract, ExecuteExt, ExecuteMsg, InstantiateMsg, QueryExt, QueryMsg},
-    state::{BALANCES, DENOM},
+    msg::{Cw721Contract, ExecuteExt, ExecuteMsg, InstantiateMsg, MetadataExt, QueryExt, QueryMsg},
+    state::{
+        BALANCES, BASE_URL, DEPOSIT_DENOM, MAX_NFT_SUPPLY, MINT_PRICE, PREVIOUS_TOKEN_ID,
+        SALE_FUNDS_RECIPIENT,
+    },
     ContractError,
 };
 
@@ -29,8 +34,21 @@ pub fn instantiate(
 
     // TODO Validate denoms are formated correctly
 
-    // Save denoms
-    DENOM.save(deps.storage, &msg.deposit_denom)?;
+    // Save config info
+    DEPOSIT_DENOM.save(deps.storage, &msg.deposit_denom)?;
+    // TODO validate base_url is a real url
+    BASE_URL.save(deps.storage, &msg.base_url)?;
+    MINT_PRICE.save(deps.storage, &msg.mint_price)?;
+    if let Some(max_nft_supply) = msg.max_nft_supply {
+        MAX_NFT_SUPPLY.save(deps.storage, &max_nft_supply)?;
+    }
+    SALE_FUNDS_RECIPIENT.save(
+        deps.storage,
+        &deps.api.addr_validate(&msg.sale_funds_recipient)?,
+    )?;
+
+    // Set initial previous token id to zero
+    PREVIOUS_TOKEN_ID.save(deps.storage, &0)?;
 
     // Instantiate the base contract
     Cw721Contract::default().instantiate(
@@ -55,6 +73,9 @@ pub fn execute(
     match msg {
         // Optionally override the default cw721-base behavior
         ExecuteMsg::Burn { token_id } => execute_burn(deps, env, info, token_id),
+
+        // Overrides default Mint method. Used to purchase and create initial NFTs
+        ExecuteMsg::Mint { .. } => execute_mint(deps, env, info),
 
         // Implment extension messages here, remove if you don't wish to use
         // An ExecuteExt extension
@@ -114,7 +135,7 @@ pub fn execute_burn(
 ) -> Result<Response, ContractError> {
     let base = Cw721Contract::default();
 
-    let denom = DENOM.load(deps.storage)?;
+    let denom = DEPOSIT_DENOM.load(deps.storage)?;
 
     // Pay out the piggy bank!
     let balance = BALANCES.may_load(deps.storage, &token_id)?;
@@ -137,6 +158,62 @@ pub fn execute_burn(
     Ok(Response::default().add_messages(msgs))
 }
 
+// NOTE: in real life, add some randomness to minting, otherwise people will game it
+pub fn execute_mint(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, ContractError> {
+    // Load mint_price and base_url
+    let base_url = BASE_URL.load(deps.storage)?;
+    let mint_price = MINT_PRICE.load(deps.storage)?;
+
+    // Check the right amount of funds were sent
+    let amount = must_pay(&info, &mint_price.denom)?;
+    if amount != mint_price.amount {
+        return Err(ContractError::WrongAmount {});
+    }
+
+    // Load previous_token_id, incrementing it, saving the new value, and returning the result
+    let next_token_id = PREVIOUS_TOKEN_ID.update(deps.storage, |previous_id| {
+        Ok::<u64, StdError>(previous_id + 1)
+    })?;
+
+    // Check the collection hasn't been minted out
+    let max_supply = MAX_NFT_SUPPLY.may_load(deps.storage)?;
+    if let Some(max_supply) = max_supply {
+        if next_token_id > max_supply {
+            return Err(ContractError::MintedOut {});
+        }
+    }
+
+    // Pay out funds to creator or recipient of sale funds
+    let recipient = SALE_FUNDS_RECIPIENT.load(deps.storage)?;
+    let msg = BankMsg::Send {
+        to_address: recipient.to_string(),
+        amount: info.funds.clone(),
+    };
+
+    // Mint the NFT and assign to the sender
+    let base = Cw721Contract::default();
+    base.execute(
+        deps,
+        env,
+        info.clone(),
+        ExecuteMsg::Mint {
+            token_id: next_token_id.to_string(),
+            owner: info.sender.to_string(),
+            // Formats the NFT token_uri (which links to the metadata) based on the token_id and the initial
+            // state for the dynamic NFT (in this case NFT trees start out as seedlings)
+            token_uri: Some(format!(
+                "{}/{}/{}",
+                base_url,
+                next_token_id.to_string(),
+                "seedling.json"
+            )),
+            extension: MetadataExt {},
+        },
+    )?;
+
+    Ok(Response::default().add_message(msg))
+}
+
 pub fn execute_deposit(
     deps: DepsMut,
     _env: Env,
@@ -144,20 +221,20 @@ pub fn execute_deposit(
     token_id: String,
 ) -> Result<Response, ContractError> {
     // Check that funds were actually sent
-    let denom = DENOM.load(deps.storage)?;
+    let denom = DEPOSIT_DENOM.load(deps.storage)?;
     // Check the right kind of funds were sent
     let amount = must_pay(&info, &denom)?;
 
     let base = Cw721Contract::default();
+
+    // Load base URL for token metadata
+    let base_url = BASE_URL.load(deps.storage)?;
 
     // Check that the token exists
     let mut token = base.tokens.load(deps.storage, &token_id)?;
 
     BALANCES.update(deps.storage, &token_id, |balance| -> StdResult<_> {
         let new_balance = balance.unwrap_or_default() + amount;
-
-        // TODO don't hard code
-        let base_url = "https://bafybeie2grcflzjvds7i33bxjjgktjdfcp2h2v27gdkbyuiaelvbgtdewy.ipfs.nftstorage.link";
 
         // Native token micro units are typically 6 decimal places
         // Check if balance is greater than 1
@@ -187,7 +264,7 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::Extension { msg } => match msg {
             // Returns Coin type for the ballance of an NFT
             QueryExt::Balance { token_id } => to_binary(&Coin {
-                denom: DENOM.load(deps.storage)?,
+                denom: DEPOSIT_DENOM.load(deps.storage)?,
                 amount: BALANCES
                     .may_load(deps.storage, &token_id)?
                     .unwrap_or_default(),

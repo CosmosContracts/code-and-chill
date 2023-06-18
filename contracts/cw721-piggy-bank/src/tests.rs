@@ -5,11 +5,11 @@ use crate::{
 };
 
 use cosmwasm_std::{
-    coins, from_binary,
+    coin, coins, from_binary,
     testing::{mock_dependencies, mock_env, mock_info},
     BankMsg, CosmosMsg, StdError,
 };
-use cw721::AllNftInfoResponse;
+use cw721::{AllNftInfoResponse, TokensResponse};
 
 /// Make sure cw2 version info is properly initialized during instantiation,
 /// and NOT overwritten by the base contract.
@@ -26,6 +26,10 @@ fn proper_cw2_initialization() {
             symbol: "".into(),
             minter: "larry".into(),
             deposit_denom: "ujuno".into(),
+            mint_price: coin(1000000, "ujuno"),
+            base_url: "https://bafybeie2grcflzjvds7i33bxjjgktjdfcp2h2v27gdkbyuiaelvbgtdewy.ipfs.nftstorage.link".to_string(),
+            max_nft_supply: Some(2),
+            sale_funds_recipient: "larry".into(),
         },
     )
     .unwrap();
@@ -49,11 +53,15 @@ fn happy_path() {
             symbol: "1337".into(),
             minter: BOB.into(),
             deposit_denom: "ujuno".into(),
+            mint_price: coin(1000000, "ujuno"),
+            base_url: "https://bafybeie2grcflzjvds7i33bxjjgktjdfcp2h2v27gdkbyuiaelvbgtdewy.ipfs.nftstorage.link".to_string(),
+            max_nft_supply: Some(2),
+            sale_funds_recipient: "larry".into(),
         },
     )
     .unwrap();
 
-    // Mint the NFT
+    // Mint the NFT fails when no funds are sent
     execute(
         deps.as_mut(),
         mock_env(),
@@ -65,7 +73,30 @@ fn happy_path() {
             extension: MetadataExt {},
         },
     )
+    .unwrap_err();
+
+    // Mint the NFT succeeds if correct amount of funds are sent
+    let res = execute(
+        deps.as_mut(),
+        mock_env(),
+        mock_info(BOB, &coins(1000000, "ujuno")),
+        ExecuteMsg::Mint {
+            // These fields are ignored, we don't need them
+            // TODO fix types for this message, these are all ignored
+            token_id: "1".into(),
+            owner: BOB.into(),
+            token_uri: Some("https://bafybeie2grcflzjvds7i33bxjjgktjdfcp2h2v27gdkbyuiaelvbgtdewy.ipfs.nftstorage.link/1/seedling.json".to_string()),
+            extension: MetadataExt {},
+        },
+    )
     .unwrap();
+    assert_eq!(
+        res.messages[0].msg,
+        CosmosMsg::Bank(BankMsg::Send {
+            to_address: "larry".to_string(),
+            amount: coins(1000000, "ujuno"),
+        })
+    );
 
     // Calling deposit funds without funds errors
     execute(
@@ -111,6 +142,20 @@ fn happy_path() {
             kind: "cw721_base::state::TokenInfo<cw721_piggy_bank::msg::MetadataExt>".to_string()
         })
     );
+
+    let token: TokensResponse = from_binary(
+        &query(
+            deps.as_ref(),
+            mock_env(),
+            QueryMsg::AllTokens {
+                start_after: None,
+                limit: None,
+            },
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    println!("{:?}", token);
 
     // Check token URI is seedling state
     let token: AllNftInfoResponse<MetadataExt> = from_binary(
