@@ -29,3 +29,4 @@ cw721-base      = { version = "0.17.0", features = ["library"] }
 schemars        = "0.8.11"
 serde           = { version = "1.0.152", default-features = false, features = ["derive"] }
 thiserror       = "1.0.30"
+url             = "2.2.2"

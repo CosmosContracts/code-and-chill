@@ -8,6 +8,7 @@ pub use cw721_base::{
     ContractError as BaseContractError, InstantiateMsg as BaseInstantiateMsg, MinterResponse,
 };
 use cw_utils::must_pay;
+use url::Url;
 
 use crate::{
     msg::{Cw721Contract, ExecuteExt, ExecuteMsg, InstantiateMsg, MetadataExt, QueryExt, QueryMsg},
@@ -36,7 +37,8 @@ pub fn instantiate(
 
     // Save config info
     DEPOSIT_DENOM.save(deps.storage, &msg.deposit_denom)?;
-    // TODO validate base_url is a real url
+    // validate base_url is a real url
+    let _parsed_url = Url::parse(&msg.base_url).map_err(|_| StdError::generic_err("Invalid base URL"))?;
     BASE_URL.save(deps.storage, &msg.base_url)?;
     MINT_PRICE.save(deps.storage, &msg.mint_price)?;
     if let Some(max_nft_supply) = msg.max_nft_supply {
