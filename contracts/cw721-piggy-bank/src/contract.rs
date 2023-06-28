@@ -4,6 +4,7 @@ use cosmwasm_std::{
     entry_point, to_binary, BankMsg, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Response,
     StdError, StdResult, Uint128,
 };
+use cw_denom::UncheckedDenom;
 pub use cw721_base::{
     ContractError as BaseContractError, InstantiateMsg as BaseInstantiateMsg, MinterResponse,
 };
@@ -33,10 +34,12 @@ pub fn instantiate(
 ) -> StdResult<Response> {
     cw2::set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
 
-    // TODO Validate denoms are formated correctly
-
+    // Validate denoms are formatted correctly
+    let unchecked_denom = UncheckedDenom::Native(msg.deposit_denom.clone());
+    let _checked_denom = unchecked_denom.into_checked(deps.as_ref()).map_err(|_| StdError::generic_err("Invalid deposit denom"))?;
+    
     // Save config info
-    DEPOSIT_DENOM.save(deps.storage, &msg.deposit_denom)?;
+    DEPOSIT_DENOM.save(deps.storage, &_checked_denom.to_string())?;
     // validate base_url is a real url
     let _parsed_url = Url::parse(&msg.base_url).map_err(|_| StdError::generic_err("Invalid base URL"))?;
     BASE_URL.save(deps.storage, &msg.base_url)?;
