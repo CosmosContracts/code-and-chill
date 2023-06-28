@@ -36,12 +36,12 @@ pub fn instantiate(
 
     // Validate denoms are formatted correctly
     let unchecked_denom = UncheckedDenom::Native(msg.deposit_denom.clone());
-    let _checked_denom = unchecked_denom.into_checked(deps.as_ref()).map_err(|_| StdError::generic_err("Invalid deposit denom"))?;
+    let checked_denom = unchecked_denom.into_checked(deps.as_ref()).map_err(|_| StdError::generic_err("Invalid deposit denom"))?;
     
     // Save config info
-    DEPOSIT_DENOM.save(deps.storage, &_checked_denom.to_string())?;
+    DEPOSIT_DENOM.save(deps.storage, &checked_denom.to_string())?;
     // validate base_url is a real url
-    let _parsed_url = Url::parse(&msg.base_url).map_err(|_| StdError::generic_err("Invalid base URL"))?;
+    Url::parse(&msg.base_url).map_err(|_| StdError::generic_err("Invalid base URL"))?;
     BASE_URL.save(deps.storage, &msg.base_url)?;
     MINT_PRICE.save(deps.storage, &msg.mint_price)?;
     if let Some(max_nft_supply) = msg.max_nft_supply {
