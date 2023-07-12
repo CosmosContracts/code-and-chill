@@ -1,5 +1,5 @@
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Coin, CustomMsg, Empty, Uint128};
+use cosmwasm_std::{Coin, CustomMsg, Empty};
 
 // Implements extended on-chain metadata, by default cw721 NFTs only store a
 // token_uri, which is a URL to off-chain metadata (same as ERC721).

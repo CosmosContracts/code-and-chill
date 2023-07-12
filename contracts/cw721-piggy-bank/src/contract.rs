@@ -1,13 +1,13 @@
-use std::fmt::format;
-
 use cosmwasm_std::{
     entry_point, to_binary, BankMsg, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Response,
     StdError, StdResult, Uint128,
 };
+use cw_denom::UncheckedDenom;
 pub use cw721_base::{
     ContractError as BaseContractError, InstantiateMsg as BaseInstantiateMsg, MinterResponse,
 };
 use cw_utils::must_pay;
+use url::Url;
 
 use crate::{
     msg::{Cw721Contract, ExecuteExt, ExecuteMsg, InstantiateMsg, MetadataExt, QueryExt, QueryMsg},
@@ -32,11 +32,14 @@ pub fn instantiate(
 ) -> StdResult<Response> {
     cw2::set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
 
-    // TODO Validate denoms are formated correctly
-
+    // Validate denoms are formatted correctly
+    let unchecked_denom = UncheckedDenom::Native(msg.deposit_denom.clone());
+    let checked_denom = unchecked_denom.into_checked(deps.as_ref()).map_err(|_| StdError::generic_err("Invalid deposit denom"))?;
+    
     // Save config info
-    DEPOSIT_DENOM.save(deps.storage, &msg.deposit_denom)?;
-    // TODO validate base_url is a real url
+    DEPOSIT_DENOM.save(deps.storage, &checked_denom.to_string())?;
+    // validate base_url is a real url
+    Url::parse(&msg.base_url).map_err(|_| StdError::generic_err("Invalid base URL"))?;
     BASE_URL.save(deps.storage, &msg.base_url)?;
     MINT_PRICE.save(deps.storage, &msg.mint_price)?;
     if let Some(max_nft_supply) = msg.max_nft_supply {
