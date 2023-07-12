@@ -1,5 +1,3 @@
-use std::fmt::format;
-
 use cosmwasm_std::{
     entry_point, to_binary, BankMsg, Binary, Coin, Deps, DepsMut, Env, MessageInfo, Response,
     StdError, StdResult, Uint128,
